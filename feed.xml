@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>KRMP Blog &amp; Insights</title>
+    <link>https://www.ymiagroup.com/blog.html</link>
+    <atom:link href="https://www.ymiagroup.com/feed.xml" rel="self" type="application/rss+xml"/>
+    <description>Research-backed articles on Kenya's rural economy, county by county — from the Kenya Rural Migration Program.</description>
+    <language>en</language>
+    <item>
+      <title>Agriculture Isn't Kenya's Past — It's Still Its Biggest Employer</title>
+      <link>https://www.ymiagroup.com/blog-why-agriculture-still-matters.html</link>
+      <guid isPermaLink="true">https://www.ymiagroup.com/blog-why-agriculture-still-matters.html</guid>
+      <pubDate>Mon, 26 Jan 2026 08:00:00 +0300</pubDate>
+      <description>The sector most development conversations treat as a stepping-stone is actually where most rural income already comes from.</description>
+    </item>
+    <item>
+      <title>Kisumu: Why KRMP's First Centre Is on the Shores of Lake Victoria</title>
+      <link>https://www.ymiagroup.com/blog-kisumu-county-spotlight.html</link>
+      <guid isPermaLink="true">https://www.ymiagroup.com/blog-kisumu-county-spotlight.html</guid>
+      <pubDate>Mon, 19 Jan 2026 08:00:00 +0300</pubDate>
+      <description>A county built on fish, sugarcane and trade — and the uneven economy underneath that story.</description>
+    </item>
+    <item>
+      <title>Kenya's Rural Opportunity, in Numbers</title>
+      <link>https://www.ymiagroup.com/blog-kenya-rural-opportunity-in-numbers.html</link>
+      <guid isPermaLink="true">https://www.ymiagroup.com/blog-kenya-rural-opportunity-in-numbers.html</guid>
+      <pubDate>Mon, 12 Jan 2026 08:00:00 +0300</pubDate>
+      <description>Why a platform like KRMP exists — and why the next ten years matter more than the last fifty.</description>
+    </item>
+  </channel>
+</rss>

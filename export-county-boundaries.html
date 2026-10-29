@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>KRMP — Export county boundaries (one-time tool)</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#101010;background:#F5F7F3;margin:0;padding:32px 16px;}
+  .card{max-width:760px;margin:0 auto;background:#fff;border:1px solid #D6E2D9;border-radius:16px;padding:28px;}
+  h1{font-size:22px;margin:0 0 6px;color:#1F7A2E;} p,li{line-height:1.6;font-size:14.5px;color:#33382f;}
+  ol{padding-left:20px;} code{background:#EAF2EC;padding:2px 6px;border-radius:4px;}
+  button{background:#1F7A2E;color:#fff;border:0;border-radius:100px;padding:11px 22px;font-weight:700;font-size:14px;cursor:pointer;}
+  button[disabled]{background:#6F8F78;cursor:not-allowed;}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0;}
+  #status{font-size:14px;margin:12px 0;padding:12px 14px;border-radius:10px;background:#EAF2EC;color:#1B3A24;}
+  #status.err{background:#FDECEA;color:#8A1F11;}
+  #stats{font-size:13.5px;color:#46524A;}
+  #preview{width:100%;height:auto;max-height:520px;background:#EAF2EC;border-radius:12px;margin-top:14px;}
+  select{padding:9px 12px;border-radius:8px;border:1px solid #BCD0C1;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Export county boundaries</h1>
+  <p>A one-time job that saves Kenya's 47 official county boundaries as a small file on <em>your own website</em>, so the ROC page map loads instantly and no longer depends on an outside server.</p>
+  <ol>
+    <li>Open this page on a computer with internet and press <strong>Start</strong> (it can take a minute on a slow connection).</li>
+    <li>Check the preview looks like Kenya, then press <strong>Download</strong>.</li>
+    <li>Put the downloaded file in your website folder at <code>data/kenya-counties.geojson</code> (next to <code>roc.html</code>).</li>
+  </ol>
+  <div class="row">
+    <button id="startBtn" type="button">Start</button>
+    <label>Detail&nbsp;<select id="detail">
+      <option value="0.002" selected>Standard (recommended)</option>
+      <option value="0.0008">Higher detail (bigger file)</option>
+      <option value="0.005">Smaller file (rougher edges)</option>
+    </select></label>
+    <button id="downloadBtn" type="button" disabled>Download kenya-counties.geojson</button>
+  </div>
+  <div id="status" role="status">Ready. Press Start.</div>
+  <div id="stats"></div>
+  <svg id="preview" viewBox="0 0 100 100" aria-label="Preview of the county boundaries" hidden></svg>
+</div>
+<script>
+
+  function mapKey(name){
+    return String(name == null ? '' : name).toLowerCase()
+      .replace(/\bcounty\b|\bcity\b/g, '').replace(/[^a-z]/g, '');
+  }
+  function mapNameOf(feature){
+    var p = (feature && feature.properties) || {};
+    var direct = p.county || p.County || p.COUNTY || p.COUNTY_NAM || p.COUNTY_NAME || p.County_Name || p.NAME || p.Name || p.name;
+    if (direct) return String(direct).trim();
+    for (var k in p){ if (/county/i.test(k) && typeof p[k] === 'string' && p[k].trim()) return p[k].trim(); }
+    return '';
+  }
+  function mapNormalizeFC(data){
+    if (!data) throw new Error('Empty response from boundary service.');
+    if (data.type === 'FeatureCollection') return data;
+    if (Array.isArray(data.features)) return { type: 'FeatureCollection', features: data.features };
+    throw new Error('Boundary service returned an unexpected format.');
+  }
+  // Keep exactly one record per county (some datasets repeat counties or add non-county rows).
+  function mapCleanCounties(fc){
+    var seen = {}, out = [];
+    fc.features.forEach(function(f){
+      var k = mapKey(mapNameOf(f));
+      if (!k || k === 'unknown' || seen[k]) return;
+      seen[k] = true; out.push(f);
+    });
+    if (out.length < 47) throw new Error('Boundary source returned ' + out.length + ' unique counties; 47 are required.');
+    return { type: 'FeatureCollection', features: out.slice(0, 47) };
+  }
+  // Douglas–Peucker line simplification, so a saved copy is small enough to keep on the device.
+  function mapSimplifyLine(pts, tol){
+    if (pts.length <= 4) return pts;
+    var sq = tol * tol, keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]];
+    keep[0] = keep[pts.length - 1] = 1;
+    while (stack.length){
+      var s = stack.pop(), a = s[0], b = s[1], maxD = 0, idx = -1;
+      var ax = pts[a][0], ay = pts[a][1], dx = pts[b][0] - ax, dy = pts[b][1] - ay, len2 = dx * dx + dy * dy;
+      for (var i = a + 1; i < b; i++){
+        var t = len2 ? ((pts[i][0] - ax) * dx + (pts[i][1] - ay) * dy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        var ex = pts[i][0] - (ax + t * dx), ey = pts[i][1] - (ay + t * dy), d = ex * ex + ey * ey;
+        if (d > maxD){ maxD = d; idx = i; }
+      }
+      if (maxD > sq && idx > -1){ keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+    }
+    var out = [];
+    for (var j = 0; j < pts.length; j++) if (keep[j]) out.push([+pts[j][0].toFixed(4), +pts[j][1].toFixed(4)]);
+    return out.length >= 4 ? out : pts;
+  }
+  function mapSimplifyGeometry(g, tol){
+    if (!g) return g;
+    if (g.type === 'Polygon') return { type: 'Polygon', coordinates: g.coordinates.map(function(r){ return mapSimplifyLine(r, tol); }) };
+    if (g.type === 'MultiPolygon') return { type: 'MultiPolygon', coordinates: g.coordinates.map(function(poly){ return poly.map(function(r){ return mapSimplifyLine(r, tol); }); }) };
+    return g;
+  }
+  function mapSlim(fc, tol){
+    return { type: 'FeatureCollection', features: fc.features.map(function(f){
+      return { type: 'Feature', properties: { county: mapNameOf(f) }, geometry: mapSimplifyGeometry(f.geometry, tol) };
+    }) };
+  }
+  
+  var SOURCES = [
+    { name: 'Survey of Kenya / WWF-Kenya', url: 'https://wwfke-giscoe.wwfkenya.org/arcgis/rest/services/Basedata_Kenya/KenyaCountyBoundary/FeatureServer/0/query' },
+    { name: 'Survey of Kenya educational ArcGIS layer', url: 'https://services1.arcgis.com/Kw7jGaBPiN3WUAmT/ArcGIS/rest/services/final_ketraco_map/FeatureServer/0/query' }
+  ];
+  var statusEl = document.getElementById('status'), statsEl = document.getElementById('stats'), startBtn = document.getElementById('startBtn'),
+      dlBtn = document.getElementById('downloadBtn'), detailEl = document.getElementById('detail'), svgEl = document.getElementById('preview');
+  var loaded = null, output = null;
+  function say(msg, isErr){ statusEl.textContent = msg; statusEl.className = isErr ? 'err' : ''; }
+  function withTimeout(factory, ms){
+    return new Promise(function(resolve, reject){
+      var done = false, ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var t = setTimeout(function(){ if (done) return; done = true; if (ctrl) ctrl.abort(); reject(new Error('Timed out')); }, ms);
+      factory(ctrl ? ctrl.signal : undefined).then(function(v){ if (!done){ done = true; clearTimeout(t); resolve(v); } }, function(e){ if (!done){ done = true; clearTimeout(t); reject(e); } });
+    });
+  }
+  function fetchJson(url, signal){ return fetch(url, { signal: signal }).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }); }
+  async function loadLive(source){
+    var idData = await withTimeout(function(s){ return fetchJson(source.url + '?where=1%3D1&returnIdsOnly=true&f=json', s); }, 30000);
+    var ids = idData.objectIds || idData.objectids || [];
+    if (!ids.length) throw new Error('No county feature IDs were returned.');
+    ids.sort(function(a, b){ return Number(a) - Number(b); });
+    var feats = [];
+    for (var i = 0; i < ids.length; i += 50){
+      say('Downloading counties ' + (i + 1) + '–' + Math.min(i + 50, ids.length) + ' of ' + ids.length + ' from ' + source.name + '…');
+      var url = source.url + '?objectIds=' + encodeURIComponent(ids.slice(i, i + 50).join(',')) + '&outFields=*&returnGeometry=true&outSR=4326&f=geojson';
+      var fc = mapNormalizeFC(await withTimeout(function(s){ return fetchJson(url, s); }, 60000));
+      feats = feats.concat(fc.features);
+    }
+    return { type: 'FeatureCollection', features: feats };
+  }
+  function countVertices(fc){
+    var n = 0;
+    fc.features.forEach(function(f){
+      var g = f.geometry; if (!g) return;
+      var polys = g.type === 'Polygon' ? [g.coordinates] : (g.type === 'MultiPolygon' ? g.coordinates : []);
+      polys.forEach(function(p){ p.forEach(function(r){ n += r.length; }); });
+    });
+    return n;
+  }
+  function drawPreview(fc){
+    var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, polysOf = function(g){ return g.type === 'Polygon' ? [g.coordinates] : g.coordinates; };
+    fc.features.forEach(function(f){ polysOf(f.geometry).forEach(function(p){ p[0].forEach(function(pt){ minX = Math.min(minX, pt[0]); maxX = Math.max(maxX, pt[0]); minY = Math.min(minY, pt[1]); maxY = Math.max(maxY, pt[1]); }); }); });
+    var w = maxX - minX, h = maxY - minY, scale = 100 / Math.max(w, h);
+    svgEl.setAttribute('viewBox', '0 0 ' + (w * scale).toFixed(2) + ' ' + (h * scale).toFixed(2));
+    var html = '';
+    fc.features.forEach(function(f){
+      var d = '';
+      polysOf(f.geometry).forEach(function(p){ p.forEach(function(r){ d += 'M' + r.map(function(pt){ return ((pt[0] - minX) * scale).toFixed(2) + ' ' + ((maxY - pt[1]) * scale).toFixed(2); }).join('L') + 'Z'; }); });
+      html += '<path d="' + d + '" fill="#CFE0D3" stroke="#5F8B6C" stroke-width="0.12"><title>' + f.properties.county + '</title></path>';
+    });
+    svgEl.innerHTML = html; svgEl.hidden = false;
+  }
+  function build(){
+    output = mapSlim(loaded, Number(detailEl.value));
+    var json = JSON.stringify(output), before = countVertices(loaded), after = countVertices(output);
+    statsEl.textContent = output.features.length + ' counties · ' + before.toLocaleString() + ' → ' + after.toLocaleString() + ' points · file size about ' + Math.round(json.length / 1024) + ' KB';
+    drawPreview(output); dlBtn.disabled = false;
+    say('Done. Check that the preview looks like Kenya, then press Download.');
+  }
+  async function start(){
+    startBtn.disabled = true; dlBtn.disabled = true; svgEl.hidden = true; statsEl.textContent = '';
+    var lastErr = null;
+    for (var i = 0; i < SOURCES.length; i++){
+      try { say('Contacting ' + SOURCES[i].name + '…'); loaded = mapCleanCounties(mapNormalizeFC(await loadLive(SOURCES[i]))); build(); startBtn.disabled = false; return; }
+      catch (e) { lastErr = e; }
+    }
+    say('Could not load the boundaries (' + (lastErr && lastErr.message) + '). Check your internet connection and press Start again.', true);
+    startBtn.disabled = false;
+  }
+  startBtn.addEventListener('click', start);
+  detailEl.addEventListener('change', function(){ if (loaded) build(); });
+  dlBtn.addEventListener('click', function(){
+    if (!output) return;
+    var blob = new Blob([JSON.stringify(output)], { type: 'application/geo+json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'kenya-counties.geojson';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+</script>
+</body>
+</html>
